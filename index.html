@@ -126,9 +126,8 @@ header{margin-bottom:40px;margin-top:20px;}
 .section-header h3{font-family:'Syne',sans-serif;font-size:15px;font-weight:700;letter-spacing:0.06em;}
 .section-header p{color:var(--muted);font-size:12px;margin-top:3px;}
 .section-summary{font-size:12px;color:var(--muted);font-family:'Syne',sans-serif;}
-.week-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:10px;}
-.gym-week-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:10px;margin-bottom:16px;}
-@media(max-width:640px){.week-grid,.gym-week-grid{grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:6px;}}
+.week-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;}
+@media(max-width:500px){.week-grid{grid-template-columns:repeat(4,1fr);}}
 .week-card{border:1px solid var(--border);border-radius:12px;padding:10px 8px;background:rgba(255,255,255,0.02);transition:all 0.2s;cursor:pointer;text-align:center;}
 .week-card:hover{border-color:rgba(255,255,255,0.12);}
 .week-card.today{border-color:var(--accent);}
@@ -143,11 +142,6 @@ header{margin-bottom:40px;margin-top:20px;}
 .day-cat-row{margin-bottom:8px;}
 .day-cat-label{font-size:11px;font-family:'Syne',sans-serif;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:4px;}
 .day-cat-items{font-size:12px;color:var(--text);line-height:1.6;}
-.day-task-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.08);}
-.day-task-row:last-child{border-bottom:none;}
-.day-task-row.done .day-task-label{color:rgba(240,239,232,0.6);text-decoration:line-through;}
-.day-task-label{flex:1;}
-.day-task-status{font-size:11px;color:var(--muted);margin-left:12px;}
 .day-empty{font-size:12px;color:var(--muted);text-align:center;padding:12px;}
 
 /* HISTORY / PROGRESS */
@@ -183,6 +177,7 @@ header{margin-bottom:40px;margin-top:20px;}
 
 /* GYM */
 .gym-section{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:22px;margin-bottom:24px;}
+.gym-week-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:16px;}
 .gym-day-card{border:1px solid var(--border);border-radius:12px;padding:10px 8px;background:rgba(255,255,255,0.02);cursor:pointer;text-align:center;transition:all 0.2s;}
 .gym-day-card:hover{border-color:rgba(255,255,255,0.12);}
 .gym-day-card.active{border-color:var(--accent);transform:translateY(-2px);}
@@ -302,7 +297,7 @@ header{margin-bottom:40px;margin-top:20px;}
       <div class="score-ring-num" id="overallPct">0%</div>
     </div>
     <div class="score-info">
-      <h2 id="scoreTitle">Aaj ka progress</h2>
+      <h2>Aaj ka progress</h2>
       <p id="scoreSubtitle">Sab categories mila ke</p>
     </div>
     <div class="category-pills" id="pillsRow"></div>
@@ -316,10 +311,10 @@ header{margin-bottom:40px;margin-top:20px;}
 
   <!-- NAV -->
   <div class="nav-tabs">
-    <button class="nav-tab active" onclick="switchMainTab('today', this)">Aaj</button>
-    <button class="nav-tab" onclick="switchMainTab('week', this)">Is Hafta</button>
-    <button class="nav-tab" onclick="switchMainTab('history', this)">History</button>
-    <button class="nav-tab" onclick="switchMainTab('gym', this)">Gym 💪</button>
+    <button class="nav-tab active" onclick="switchMainTab('today')">Aaj</button>
+    <button class="nav-tab" onclick="switchMainTab('week')">Is Hafta</button>
+    <button class="nav-tab" onclick="switchMainTab('history')">History</button>
+    <button class="nav-tab" onclick="switchMainTab('gym')">Gym 💪</button>
   </div>
 
   <!-- TODAY TAB -->
@@ -494,17 +489,42 @@ window.doRegister = async function() {
 };
 
 window.doLogout = async function() {
+  // Logout pe bvp_ data clear karo
+  const keysToRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('bvp_') && k !== 'bvp_last_uid') keysToRemove.push(k);
+  }
+  keysToRemove.forEach(k => localStorage.removeItem(k));
   await signOut(auth);
 };
 
+let lastLoggedInUID = localStorage.getItem('bvp_last_uid');
+
 onAuthStateChanged(auth, async (user) => {
   if (user) {
+    // Agar naya user hai — pehle wala data clear karo
+    if (lastLoggedInUID && lastLoggedInUID !== user.uid) {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('bvp_') && k !== 'bvp_last_uid') keysToRemove.push(k);
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    }
+
+    // Is user ka UID save karo
+    localStorage.setItem('bvp_last_uid', user.uid);
+    lastLoggedInUID = user.uid;
     currentUID = user.uid;
+
     document.getElementById('authOverlay').style.display = 'none';
     const bar = document.getElementById('userBar');
     bar.style.display = 'flex';
     document.getElementById('userNameBar').textContent = '👋 ' + (user.displayName || user.email.split('@')[0]);
-    const pulled = await pullAll();
+
+    // Firebase se is user ka data load karo
+    await pullAll();
     render();
   } else {
     currentUID = null;
@@ -517,23 +537,18 @@ onAuthStateChanged(auth, async (user) => {
 function ls(key, def) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch(e) { return def; } }
 function lss(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
-function isoFromDate(date) {
-  const pad = num => String(num).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-function todayISO() { return isoFromDate(new Date()); }
+function todayISO() { return new Date().toISOString().slice(0,10); }
 function getWeekRange(monday) {
   const m = monday ? new Date(monday) : (() => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - (d.getDay()+6)%7); return d; })();
   return ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((lbl,i) => {
     const d = new Date(m); d.setDate(m.getDate()+i);
-    return { lbl, iso: isoFromDate(d) };
+    return { lbl, iso: d.toISOString().slice(0,10) };
   });
 }
 function currentMonday() {
   const d = new Date(); d.setHours(0,0,0,0);
   d.setDate(d.getDate() - (d.getDay()+6)%7);
-  return isoFromDate(d);
+  return d.toISOString().slice(0,10);
 }
 
 // ========== CATEGORIES (user-defined) ==========
@@ -643,10 +658,10 @@ window.saveTaskEdit = function() {
 window.deleteTask = function(catId, taskId) {
   saveTasks(catId, getTasks(catId).filter(t => t.id !== taskId));
   // clean from day state
-  const iso = currentViewIso;
-  const state = getDayState(iso);
+  const today = todayISO();
+  const state = getDayState(today);
   if (state[catId]) state[catId] = state[catId].filter(id => id !== taskId);
-  saveDayState(iso, state);
+  saveDayState(today, state);
   render();
 };
 
@@ -654,14 +669,14 @@ window.deleteTask = function(catId, taskId) {
 function getDayState(iso) { return ls('bvp_day_' + iso, {}); }
 function saveDayState(iso, state) { lss('bvp_day_' + iso, state); }
 
-function toggleTask(catId, taskId, iso) {
-  const targetIso = iso || currentViewIso;
-  const state = getDayState(targetIso);
+function toggleTask(catId, taskId) {
+  const iso = todayISO();
+  const state = getDayState(iso);
   if (!state[catId]) state[catId] = [];
   const idx = state[catId].indexOf(taskId);
   if (idx > -1) state[catId].splice(idx, 1); else state[catId].push(taskId);
-  saveDayState(targetIso, state);
-  updateHistory(targetIso);
+  saveDayState(iso, state);
+  updateHistory();
   render();
 }
 window.toggleTask = toggleTask;
@@ -669,8 +684,7 @@ window.toggleTask = toggleTask;
 function getCatPct(catId, iso) {
   const tasks = getTasks(catId);
   if (!tasks.length) return 0;
-  const targetIso = iso || currentViewIso;
-  const state = getDayState(targetIso);
+  const state = getDayState(iso || todayISO());
   const done = (state[catId] || []).filter(id => tasks.some(t => t.id === id)).length;
   return Math.round((done / tasks.length) * 100);
 }
@@ -687,54 +701,10 @@ function getDayPct(iso) {
 
 // ========== HISTORY ==========
 function getHistory() { return ls('bvp_history', {}); }
-function updateHistory(iso) {
-  const key = iso || todayISO();
+function updateHistory() {
   const h = getHistory();
-  h[key] = getDayPct(key);
+  h[todayISO()] = getDayPct(todayISO());
   lss('bvp_history', h);
-}
-
-function isGymGoalReached(iso) {
-  const week = getWeekRange();
-  const day = week.find(d => d.iso === iso);
-  if (!day) return false;
-  const plan = getGymPlan(day.lbl);
-  if (!plan.exercises.length) return false;
-  const done = getGymDayState(iso);
-  const doneCount = done.filter(id => plan.exercises.some(ex => ex.id === id)).length;
-  const pct = Math.round((doneCount / plan.exercises.length) * 100);
-  return pct >= plan.goal;
-}
-
-function syncGymChecklist(iso, reached) {
-  const cats = getCategories();
-  if (!cats.length) return;
-  const state = getDayState(iso);
-  let mutated = false;
-  cats.forEach(cat => {
-    if (!/gym|fitness/i.test(cat.label)) return;
-    const tasks = getTasks(cat.id);
-    if (!tasks.length) return;
-    const ids = tasks.map(t => t.id);
-    const current = state[cat.id] || [];
-    if (reached) {
-      const merged = Array.from(new Set([...current, ...ids]));
-      if (merged.length !== current.length) {
-        state[cat.id] = merged;
-        mutated = true;
-      }
-    } else {
-      const filtered = current.filter(id => !ids.includes(id));
-      if (filtered.length !== current.length) {
-        state[cat.id] = filtered;
-        mutated = true;
-      }
-    }
-  });
-  if (mutated) {
-    saveDayState(iso, state);
-    updateHistory(iso);
-  }
 }
 
 // ========== STREAK ==========
@@ -744,7 +714,7 @@ function getStreak() {
   const today = new Date();
   for (let i = 0; i < 30; i++) {
     const d = new Date(today); d.setDate(d.getDate() - i);
-    const iso = isoFromDate(d);
+    const iso = d.toISOString().slice(0,10);
     if ((h[iso] || 0) >= 50) streak++; else break;
   }
   return streak;
@@ -752,60 +722,14 @@ function getStreak() {
 
 
 // ========== SCORE BAR HELPER ==========
-function updateScoreBar(title, pct, pills, subtitle) {
+function updateScoreBar(title, pct, pills) {
   const circ = 2*Math.PI*30;
   document.getElementById('overallCircle').setAttribute('stroke-dashoffset', circ - circ*pct/100);
   document.getElementById('overallPct').textContent = pct + '%';
-  document.getElementById('scoreTitle').textContent = title;
-  document.getElementById('scoreSubtitle').textContent = subtitle !== undefined ? subtitle : title;
+  document.getElementById('scoreSubtitle').textContent = title;
   document.getElementById('pillsRow').innerHTML = (pills||[]).map(p =>
     `<div class="pill" style="color:${p.color};border-color:${p.color}33;background:${p.color}11">${p.icon} ${p.pct}%</div>`
   ).join('');
-}
-
-let activeMainTab = 'today';
-let currentViewIso = todayISO();
-let lastKnownIso = todayISO();
-let midnightTimer = null;
-
-function updateScoreForTab(tab) {
-  const cats = getCategories();
-  if (tab === 'today') {
-    const pct = getDayPct(currentViewIso);
-    const pills = cats.map(c => ({ color: c.color, icon: c.icon, pct: getCatPct(c.id, currentViewIso) }));
-    updateScoreBar('Aaj ka progress', pct, pills, 'Sab categories mila ke');
-    return;
-  }
-
-  if (tab === 'week') {
-    const week = getWeekRange();
-    const h = getHistory();
-    const avg = week.length ? Math.round(week.reduce((s, d) => s + (h[d.iso] || 0), 0) / week.length) : 0;
-    updateScoreBar('Is hafte ka average', avg, [], 'Pichhle 7 din ka average');
-    return;
-  }
-
-  if (tab === 'history') {
-    const h = getHistory();
-    const vals = Object.values(h).filter(v => v > 0);
-    const avg = vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : 0;
-    updateScoreBar('Overall average', avg, [], 'Pichhle dino ka snapshot');
-    return;
-  }
-
-  if (tab === 'gym') {
-    const week = getWeekRange();
-    const gymDone = week.reduce((s, d) => {
-      const lbl = d.lbl;
-      const plan = getGymPlan(lbl);
-      const done = getGymDayState(d.iso);
-      return s + done.filter(id => plan.exercises.some(e => e.id === id)).length;
-    }, 0);
-    const gymTotal = week.reduce((s, d) => s + getGymPlan(d.lbl).exercises.length, 0);
-    const gymPct = gymTotal ? Math.round((gymDone / gymTotal) * 100) : 0;
-    updateScoreBar('Gym — is hafte', gymPct, [], 'Workout streak');
-    return;
-  }
 }
 
 // ========== RENDER ==========
@@ -881,7 +805,6 @@ window.selectGymDay = function(iso) {
 function renderGymTab() {
   const week = getWeekRange();
   const today = todayISO();
-  syncGymChecklist(activeGymDay, isGymGoalReached(activeGymDay));
 
   // Week grid
   let weekDone=0, weekTotal=0;
@@ -924,30 +847,28 @@ function renderGymTab() {
     </div>`;
   }).join('') : '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">Is din koi exercise nahi — add karo! 👇</div>';
   document.getElementById('gymExList').innerHTML = exHtml;
-
-  if (activeMainTab === 'gym') {
-    updateScoreForTab('gym');
-  }
 }
 
 window.render = function render() {
-  const displayIso = currentViewIso;
+  const today = todayISO();
   const cats = getCategories();
-  const state = getDayState(displayIso);
-  updateHistory(displayIso);
-  const pct = getDayPct(displayIso);
+  const state = getDayState(today);
+  updateHistory();
 
   // Date badge
-  document.getElementById('dateBadge').textContent = new Date(displayIso).toLocaleDateString('en-PK', {weekday:'short',day:'numeric',month:'short'});
+  document.getElementById('dateBadge').textContent = new Date().toLocaleDateString('en-PK', {weekday:'short',day:'numeric',month:'short'});
 
   // Overall score — aaj ka (Today tab)
-  updateScoreForTab(activeMainTab);
+  const total = cats.reduce((s,c) => s + getTasks(c.id).length, 0);
+  const done = cats.reduce((s,c) => s + (state[c.id]||[]).filter(id => getTasks(c.id).some(t=>t.id===id)).length, 0);
+  const pct = total ? Math.round((done/total)*100) : 0;
+  updateScoreBar('Aaj ka progress', pct, cats.map(c => ({ color: c.color, icon: c.icon, pct: getCatPct(c.id) })));
 
   // Streak
   const streak = getStreak();
   document.getElementById('streakVal').textContent = streak + ' din 🔥';
   const dots = [];
-  for (let i=6;i>=0;i--) { const d=new Date(); d.setDate(d.getDate()-i); dots.push((getHistory()[isoFromDate(d)]||0)>=50); }
+  for (let i=6;i>=0;i--) { const d=new Date(); d.setDate(d.getDate()-i); dots.push((getHistory()[d.toISOString().slice(0,10)]||0)>=50); }
   document.getElementById('streakDots').innerHTML = dots.map(a=>`<div class="streak-dot${a?' active':''}"></div>`).join('');
 
   // TODAY CARDS
@@ -1011,9 +932,7 @@ window.render = function render() {
 let selectedWeekDay = todayISO();
 window.selectDay = function(iso) {
   selectedWeekDay = iso;
-  currentViewIso = iso;
   renderWeek();
-  if (activeMainTab === 'today') render();
 };
 
 function renderWeek() {
@@ -1048,18 +967,12 @@ function renderWeek() {
   if (!cats.length) { body.innerHTML = '<div class="day-empty">Koi category nahi hai.</div>'; return; }
   const rows = cats.map(cat => {
     const tasks = getTasks(cat.id);
-    if (!tasks.length) return '';
-    const doneIds = dayState[cat.id] || [];
-    const items = tasks.map(task => {
-      const done = doneIds.includes(task.id);
-      return `<div class="day-task-row${done?' done':''}" onclick="toggleTask('${cat.id}','${task.id}','${selectedWeekDay}')">
-        <span class="day-task-label">${task.label}</span>
-        <span class="day-task-status">${done?'✓':'○'}</span>
-      </div>`;
-    }).join('');
-    return `<div class="day-cat-row"><div class="day-cat-label" style="color:${cat.color}">${cat.icon} ${cat.label}</div><div class="day-cat-items">${items}</div></div>`;
+    const doneIds = (dayState[cat.id]||[]).filter(id=>tasks.some(t=>t.id===id));
+    if (!doneIds.length) return '';
+    const labels = doneIds.map(id=>tasks.find(t=>t.id===id)?.label).filter(Boolean).join(', ');
+    return `<div class="day-cat-row"><div class="day-cat-label" style="color:${cat.color}">${cat.icon} ${cat.label}</div><div class="day-cat-items">${labels}</div></div>`;
   }).filter(Boolean).join('');
-  body.innerHTML = rows || '<div class="day-empty">Is din koi task set nahi hua.</div>';
+  body.innerHTML = rows || '<div class="day-empty">Is din koi task complete nahi hua.</div>';
 }
 
 // ========== HISTORY RENDER ==========
@@ -1069,7 +982,7 @@ function getPastWeeks(n) {
   const thisMon = new Date(today); thisMon.setDate(today.getDate()-(today.getDay()+6)%7);
   for (let w=1; w<=n; w++) {
     const mon = new Date(thisMon); mon.setDate(thisMon.getDate()-w*7);
-    weeks.push({ monday: isoFromDate(mon), days: getWeekRange(mon) });
+    weeks.push({ monday: mon.toISOString().slice(0,10), days: getWeekRange(mon) });
   }
   return weeks;
 }
@@ -1082,7 +995,7 @@ function renderHistory() {
   const bars = [];
   for (let i=27;i>=0;i--) {
     const d = new Date(); d.setDate(d.getDate()-i);
-    const iso = isoFromDate(d);
+    const iso = d.toISOString().slice(0,10);
     const p = h[iso] || 0;
     const isToday = iso === today;
     bars.push({ iso, p, lbl: i%7===0 ? d.toLocaleDateString('en',{month:'short',day:'numeric'}) : '', isToday });
@@ -1112,50 +1025,56 @@ function renderHistory() {
   }).join('') || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Abhi tak koi history nahi — aaj se shuru karo! 🔥</div>';
 }
 
-function scheduleMidnightRefresh() {
-  clearTimeout(midnightTimer);
-  const now = new Date();
-  const nextMidnight = new Date(now);
-  nextMidnight.setHours(0,0,0,0);
-  nextMidnight.setDate(nextMidnight.getDate() + 1);
-  const delay = Math.max(nextMidnight - now + 1000, 1000);
-  midnightTimer = setTimeout(() => {
-    const prevIso = lastKnownIso;
-    const iso = todayISO();
-    lastKnownIso = iso;
-    if (currentViewIso === prevIso) currentViewIso = iso;
-    if (selectedWeekDay === prevIso) selectedWeekDay = iso;
-    render();
-    scheduleMidnightRefresh();
-  }, delay);
-}
-
 // ========== TABS ==========
-window.switchMainTab = function(tab, btn) {
+window.switchMainTab = function(tab) {
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(b=>b.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
-  if(btn) btn.classList.add('active');
-  activeMainTab = tab;
-  if (tab === 'today') {
-    render();
-    return;
+  event.target.classList.add('active');
+  const cats = getCategories();
+  if(tab==='today') {
+    const today = todayISO();
+    const state = getDayState(today);
+    const total = cats.reduce((s,c)=>s+getTasks(c.id).length,0);
+    const done = cats.reduce((s,c)=>s+(state[c.id]||[]).filter(id=>getTasks(c.id).some(t=>t.id===id)).length,0);
+    const pct = total ? Math.round((done/total)*100) : 0;
+    updateScoreBar('Aaj ka progress', pct, cats.map(c=>({color:c.color,icon:c.icon,pct:getCatPct(c.id)})));
   }
-  if(tab==='week') renderWeek();
-  if(tab==='history') renderHistory();
-  if(tab==='gym') renderGymTab();
-  updateScoreForTab(tab);
+  if(tab==='week') {
+    const week = getWeekRange();
+    const h = getHistory();
+    const avg = Math.round(week.reduce((s,d)=>s+(h[d.iso]||0),0)/7);
+    updateScoreBar('Is hafte ka average', avg, []);
+    renderWeek();
+  }
+  if(tab==='history') {
+    const h = getHistory();
+    const vals = Object.values(h).filter(v=>v>0);
+    const avg = vals.length ? Math.round(vals.reduce((s,v)=>s+v,0)/vals.length) : 0;
+    updateScoreBar('Overall average', avg, []);
+    renderHistory();
+  }
+  if(tab==='gym') {
+    const week = getWeekRange();
+    const gymDone = week.reduce((s,d)=>{
+      const lbl=d.lbl, plan=getGymPlan(lbl), done=getGymDayState(d.iso);
+      return s+done.filter(id=>plan.exercises.some(e=>e.id===id)).length;
+    },0);
+    const gymTotal = week.reduce((s,d)=>s+getGymPlan(d.lbl).exercises.length,0);
+    const gymPct = gymTotal ? Math.round((gymDone/gymTotal)*100) : 0;
+    updateScoreBar('Gym — is hafte', gymPct, []);
+    renderGymTab();
+  }
 };
 
 // ========== RESET ==========
 window.resetToday = function() {
-  if (!confirm('Is din ka sab data reset karo?')) return;
-  saveDayState(currentViewIso, {});
+  if (!confirm('Aaj ka sab data reset karo?')) return;
+  saveDayState(todayISO(), {});
   render();
 };
 
 window.render();
-scheduleMidnightRefresh();
 </script>
 </body>
 </html>
