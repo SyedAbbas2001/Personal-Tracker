@@ -537,18 +537,50 @@ onAuthStateChanged(auth, async (user) => {
 function ls(key, def) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch(e) { return def; } }
 function lss(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
-function todayISO() { return new Date().toISOString().slice(0,10); }
+function localISO(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+function parseLocalISO(iso) {
+  if (!iso) return null;
+  const parts = iso.split('-').map(v => parseInt(v, 10));
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  const dt = new Date();
+  dt.setFullYear(parts[0], parts[1] - 1, parts[2]);
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+}
+function todayISO() { return localISO(new Date()); }
 function getWeekRange(monday) {
-  const m = monday ? new Date(monday) : (() => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - (d.getDay()+6)%7); return d; })();
-  return ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((lbl,i) => {
-    const d = new Date(m); d.setDate(m.getDate()+i);
-    return { lbl, iso: d.toISOString().slice(0,10) };
+  const start = (() => {
+    if (monday) {
+      if (typeof monday === 'string') {
+        const parsed = parseLocalISO(monday);
+        if (parsed) return parsed;
+      } else {
+        const clone = new Date(monday);
+        clone.setHours(0, 0, 0, 0);
+        return clone;
+      }
+    }
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - (d.getDay() + 6) % 7);
+    return d;
+  })();
+  return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((lbl, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return { lbl, iso: localISO(d) };
   });
 }
 function currentMonday() {
-  const d = new Date(); d.setHours(0,0,0,0);
-  d.setDate(d.getDate() - (d.getDay()+6)%7);
-  return d.toISOString().slice(0,10);
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - (d.getDay() + 6) % 7);
+  return localISO(d);
 }
 
 // ========== CATEGORIES (user-defined) ==========
@@ -658,7 +690,7 @@ window.saveTaskEdit = function() {
 window.deleteTask = function(catId, taskId) {
   saveTasks(catId, getTasks(catId).filter(t => t.id !== taskId));
   // clean from day state
-  const today = todayISO();
+  const today = viewedDayIso;
   const state = getDayState(today);
   if (state[catId]) state[catId] = state[catId].filter(id => id !== taskId);
   saveDayState(today, state);
@@ -670,7 +702,7 @@ function getDayState(iso) { return ls('bvp_day_' + iso, {}); }
 function saveDayState(iso, state) { lss('bvp_day_' + iso, state); }
 
 function toggleTask(catId, taskId) {
-  const iso = todayISO();
+  const iso = viewedDayIso;
   const state = getDayState(iso);
   if (!state[catId]) state[catId] = [];
   const idx = state[catId].indexOf(taskId);
@@ -684,8 +716,8 @@ window.toggleTask = toggleTask;
 function getCatPct(catId, iso) {
   const tasks = getTasks(catId);
   if (!tasks.length) return 0;
-  const state = getDayState(iso || todayISO());
-  const done = (state[catId] || []).filter(id => tasks.some(t => t.id === id)).length;
+  const resolved = getResolvedDayState(iso || viewedDayIso);
+  const done = (resolved[catId] || []).filter(id => tasks.some(t => t.id === id)).length;
   return Math.round((done / tasks.length) * 100);
 }
 
@@ -694,8 +726,8 @@ function getDayPct(iso) {
   if (!cats.length) return 0;
   const total = cats.reduce((s, c) => s + getTasks(c.id).length, 0);
   if (!total) return 0;
-  const state = getDayState(iso);
-  const done = cats.reduce((s, c) => s + (state[c.id] || []).filter(id => getTasks(c.id).some(t => t.id === id)).length, 0);
+  const resolved = getResolvedDayState(iso);
+  const done = cats.reduce((s, c) => s + (resolved[c.id] || []).filter(id => getTasks(c.id).some(t => t.id === id)).length, 0);
   return Math.round((done / total) * 100);
 }
 
@@ -703,7 +735,7 @@ function getDayPct(iso) {
 function getHistory() { return ls('bvp_history', {}); }
 function updateHistory() {
   const h = getHistory();
-  h[todayISO()] = getDayPct(todayISO());
+  h[viewedDayIso] = getDayPct(viewedDayIso);
   lss('bvp_history', h);
 }
 
@@ -714,7 +746,7 @@ function getStreak() {
   const today = new Date();
   for (let i = 0; i < 30; i++) {
     const d = new Date(today); d.setDate(d.getDate() - i);
-    const iso = d.toISOString().slice(0,10);
+    const iso = localISO(d);
     if ((h[iso] || 0) >= 50) streak++; else break;
   }
   return streak;
@@ -752,6 +784,41 @@ function saveGymPlan(dayLbl, plan) {
 }
 function getGymDayState(iso) { return ls('bvp_gym_' + iso, []); }
 function saveGymDayState(iso, done) { lss('bvp_gym_' + iso, done); }
+
+function getGymDayProgress(iso) {
+  if (!iso) return { goalReached: false, total: 0, doneCount: 0, pct: 0 };
+  const dayLbl = getWeekRange().find(d => d.iso === iso)?.lbl || '';
+  const plan = getGymPlan(dayLbl);
+  const done = getGymDayState(iso);
+  const total = plan.exercises.length;
+  const doneCount = done.filter(id => plan.exercises.some(e => e.id === id)).length;
+  const pct = total ? Math.round((doneCount / total) * 100) : 0;
+  const goalReached = total ? pct >= (plan.goal || 0) : false;
+  return { goalReached, total, doneCount, pct };
+}
+
+function isGymCategory(cat) {
+  const label = (cat?.label || '').toLowerCase();
+  return ['gym', 'workout', 'exercise'].some(term => label.includes(term));
+}
+
+function resolveCatState(cat, tasks, state, iso, gymStatus) {
+  if (!isGymCategory(cat)) return state[cat.id] || [];
+  if (gymStatus?.goalReached) return tasks.map(t => t.id);
+  return [];
+}
+
+function getResolvedDayState(iso) {
+  if (!iso) return {};
+  const baseState = getDayState(iso);
+  const gymStatus = getGymDayProgress(iso);
+  const cats = getCategories();
+  return cats.reduce((acc, cat) => {
+    const tasks = getTasks(cat.id);
+    acc[cat.id] = resolveCatState(cat, tasks, baseState, iso, gymStatus);
+    return acc;
+  }, {});
+}
 
 window.toggleGymEx = function(iso, exId) {
   const dayLbl = getWeekRange().find(d=>d.iso===iso)?.lbl || '';
@@ -852,34 +919,43 @@ function renderGymTab() {
 window.render = function render() {
   const today = todayISO();
   const cats = getCategories();
-  const state = getDayState(today);
+  const dayIso = viewedDayIso;
+  const resolvedState = getResolvedDayState(dayIso);
   updateHistory();
 
-  // Date badge
-  document.getElementById('dateBadge').textContent = new Date().toLocaleDateString('en-PK', {weekday:'short',day:'numeric',month:'short'});
+  const badgeText = formatBadgeDate(dayIso);
+  document.getElementById('dateBadge').textContent = badgeText;
 
-  // Overall score — aaj ka (Today tab)
-  const total = cats.reduce((s,c) => s + getTasks(c.id).length, 0);
-  const done = cats.reduce((s,c) => s + (state[c.id]||[]).filter(id => getTasks(c.id).some(t=>t.id===id)).length, 0);
+  const catData = cats.map(cat => {
+    const tasks = getTasks(cat.id);
+    const catState = resolvedState[cat.id] || [];
+    return { cat, tasks, catState };
+  });
+  const total = catData.reduce((s, d) => s + d.tasks.length, 0);
+  const done = catData.reduce((s, d) => s + d.catState.length, 0);
   const pct = total ? Math.round((done/total)*100) : 0;
-  updateScoreBar('Aaj ka progress', pct, cats.map(c => ({ color: c.color, icon: c.icon, pct: getCatPct(c.id) })));
+  const scoreTitle = dayIso === today ? 'Aaj ka progress' : `${badgeText} ka progress`;
+  updateScoreBar(scoreTitle, pct, catData.map(({cat}) => ({ color: cat.color, icon: cat.icon, pct: getCatPct(cat.id, dayIso) })));
 
   // Streak
   const streak = getStreak();
   document.getElementById('streakVal').textContent = streak + ' din 🔥';
   const dots = [];
-  for (let i=6;i>=0;i--) { const d=new Date(); d.setDate(d.getDate()-i); dots.push((getHistory()[d.toISOString().slice(0,10)]||0)>=50); }
+  for (let i=6;i>=0;i--) {
+    const d=new Date();
+    d.setDate(d.getDate()-i);
+    const iso = localISO(d);
+    dots.push((getHistory()[iso] || 0) >= 50);
+  }
   document.getElementById('streakDots').innerHTML = dots.map(a=>`<div class="streak-dot${a?' active':''}"></div>`).join('');
 
   // TODAY CARDS
   const grid = document.getElementById('cardsGrid');
-  if (!cats.length) {
+  if (!catData.length) {
     document.getElementById('addCatBtnWrap').style.display='none';
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>Apni pehli category banao! 🎯</h3><p>Koi bhi goal set karo — Fitness, Skill, Reading — jo bhi chahiye. Apni marzi ka dashboard!</p><button class="auth-btn" style="width:auto;padding:12px 28px;margin-top:8px" onclick="openAddCat()">+ Category banao</button></div>`;
   } else {
-    grid.innerHTML = cats.map((cat, cidx) => {
-      const tasks = getTasks(cat.id);
-      const catState = state[cat.id] || [];
+    grid.innerHTML = catData.map(({cat, tasks, catState}, cidx) => {
       const catPct = tasks.length ? Math.round((catState.filter(id=>tasks.some(t=>t.id===id)).length/tasks.length)*100) : 0;
       const items = tasks.map(task => {
         const isDone = catState.includes(task.id);
@@ -930,8 +1006,16 @@ window.render = function render() {
 
 // ========== WEEK RENDER ==========
 let selectedWeekDay = todayISO();
-window.selectDay = function(iso) {
+let viewedDayIso = todayISO();
+function setDisplayedDay(iso) {
   selectedWeekDay = iso;
+  viewedDayIso = iso;
+}
+function formatBadgeDate(iso) {
+  return new Date(iso + 'T12:00:00').toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+window.selectDay = function(iso) {
+  setDisplayedDay(iso);
   renderWeek();
 };
 
@@ -956,7 +1040,7 @@ function renderWeek() {
   }).join('');
 
   // Day detail
-  const dayState = getDayState(selectedWeekDay);
+  const dayState = getResolvedDayState(selectedWeekDay);
   const dayPct = getDayPct(selectedWeekDay);
   const det = document.getElementById('dayDetail');
   det.style.display = 'block';
@@ -967,7 +1051,7 @@ function renderWeek() {
   if (!cats.length) { body.innerHTML = '<div class="day-empty">Koi category nahi hai.</div>'; return; }
   const rows = cats.map(cat => {
     const tasks = getTasks(cat.id);
-    const doneIds = (dayState[cat.id]||[]).filter(id=>tasks.some(t=>t.id===id));
+    const doneIds = dayState[cat.id] || [];
     if (!doneIds.length) return '';
     const labels = doneIds.map(id=>tasks.find(t=>t.id===id)?.label).filter(Boolean).join(', ');
     return `<div class="day-cat-row"><div class="day-cat-label" style="color:${cat.color}">${cat.icon} ${cat.label}</div><div class="day-cat-items">${labels}</div></div>`;
@@ -982,7 +1066,7 @@ function getPastWeeks(n) {
   const thisMon = new Date(today); thisMon.setDate(today.getDate()-(today.getDay()+6)%7);
   for (let w=1; w<=n; w++) {
     const mon = new Date(thisMon); mon.setDate(thisMon.getDate()-w*7);
-    weeks.push({ monday: mon.toISOString().slice(0,10), days: getWeekRange(mon) });
+    weeks.push({ monday: localISO(mon), days: getWeekRange(mon) });
   }
   return weeks;
 }
@@ -995,7 +1079,7 @@ function renderHistory() {
   const bars = [];
   for (let i=27;i>=0;i--) {
     const d = new Date(); d.setDate(d.getDate()-i);
-    const iso = d.toISOString().slice(0,10);
+    const iso = localISO(d);
     const p = h[iso] || 0;
     const isToday = iso === today;
     bars.push({ iso, p, lbl: i%7===0 ? d.toLocaleDateString('en',{month:'short',day:'numeric'}) : '', isToday });
@@ -1013,7 +1097,7 @@ function renderHistory() {
   document.getElementById('prevWeeks').innerHTML = pastWeeks.map(w => {
     const dayPcts = w.days.map(d => h[d.iso]||0);
     const avg = Math.round(dayPcts.reduce((s,p)=>s+p,0)/7);
-    const monDate = new Date(w.monday).toLocaleDateString('en',{month:'short',day:'numeric'});
+    const monDate = parseLocalISO(w.monday)?.toLocaleDateString('en',{month:'short',day:'numeric'}) || w.monday;
     const days = ['M','T','W','T','F','S','S'];
     return `<div class="prev-week-row">
       <div class="prev-week-header">
@@ -1033,12 +1117,8 @@ window.switchMainTab = function(tab) {
   event.target.classList.add('active');
   const cats = getCategories();
   if(tab==='today') {
-    const today = todayISO();
-    const state = getDayState(today);
-    const total = cats.reduce((s,c)=>s+getTasks(c.id).length,0);
-    const done = cats.reduce((s,c)=>s+(state[c.id]||[]).filter(id=>getTasks(c.id).some(t=>t.id===id)).length,0);
-    const pct = total ? Math.round((done/total)*100) : 0;
-    updateScoreBar('Aaj ka progress', pct, cats.map(c=>({color:c.color,icon:c.icon,pct:getCatPct(c.id)})));
+    render();
+    return;
   }
   if(tab==='week') {
     const week = getWeekRange();
@@ -1071,6 +1151,7 @@ window.switchMainTab = function(tab) {
 window.resetToday = function() {
   if (!confirm('Aaj ka sab data reset karo?')) return;
   saveDayState(todayISO(), {});
+  setDisplayedDay(todayISO());
   render();
 };
 
